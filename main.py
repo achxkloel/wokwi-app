@@ -98,6 +98,11 @@ while True:
     curr_humidity = dht22.humidity()
 
     if last_temperature != curr_temperature or last_humidity != curr_humidity:
+        # Asserts for Wokwi-CI
+        assert 0 <= curr_humidity <= 100, "Humidity out of range"
+        assert -40 <= curr_temperature <= 80, "Temperature out of range"
+        print("DHT22 values are in valid range")
+
         last_temperature = curr_temperature
         last_humidity = curr_humidity
         send_dht22(curr_temperature, curr_humidity)
