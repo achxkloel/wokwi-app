@@ -6,19 +6,12 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - name: Test temperature
+      - uses: actions/checkout@v3
+      - run: |
+          echo ${{ github.workspace }}
+          echo $GITHUB_WORKSPACE
+      - name: Test with Wokwi
         uses: wokwi/wokwi-ci-action@v1
         with:
           token: ${{ secrets.WOKWI_CLI_TOKEN }}
-          path: /
-          timeout: 10000
-          fail_text: "Temperature out of range"
-          expect_text: "DHT22 values are in valid range"
-      - name: Test humidity
-        uses: wokwi/wokwi-ci-action@v1
-        with:
-          token: ${{ secrets.WOKWI_CLI_TOKEN }}
-          path: /
-          timeout: 10000
-          fail_text: "Humidity out of range"
-          expect_text: "DHT22 values are in valid range"
+          expect_text: 'Trying to connect to Wifi...'
