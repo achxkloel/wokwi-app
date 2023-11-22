@@ -2,17 +2,20 @@ import sys
 import time
 import network # for WiFi connection
 import urequests # for HTTP requests
-from machine import Pin
+from machine import Pin, I2C
 from dht import DHT22
+import ssd1306
+import uasyncio
+import ntptime
 
-# Button
-button = Pin(26, Pin.IN, Pin.PULL_UP)
-
-# LED
-led = Pin(18, Pin.OUT)
+ntptime.host = "tik.cesnet.cz"
+cet_offset = 3600
 
 # Temperature and humidity sensor
 dht22 = DHT22(Pin(23))
+
+# OLED display
+i2c = I2C(1, scl=Pin(22), sda=Pin(21))
 
 # WiFi credentials
 wifi_ssid = "Wokwi-GUEST"
@@ -25,40 +28,28 @@ timeout_limit = 10
 server_url = "https://5420cb00-2496-4be0-ac62-279446417ea1.mock.pstmn.io"
 http_headers = { "Content-Typ": "application/json" }
 
-# Connect to WiFi
-def connect_wifi ():
-    wifi = network.WLAN(network.STA_IF)
-    wifi.active(True)
-    wifi.disconnect()
-    wifi.connect(wifi_ssid, wifi_password)
+wifi = network.WLAN(network.STA_IF)
 
-    if not wifi.isconnected():
-        print("Waiting for connection...")
-        timeout = 0
-        while (not wifi.isconnected() and timeout < timeout_limit):
-            timeout = timeout + 1
-            time.sleep(1) 
+# Connect to WiFi
+async def connect_wifi ():
+    wifi.active(True)
 
     if wifi.isconnected():
-        print("Connected to", wifi_ssid)
-    else:
-        print("Failed to connect to", wifi_ssid)
-        sys.exit()
+        return
 
-# Send information about LED state
-def send_led_state (state):
-    try:
-        url = server_url + "/led_state"
-        print("Sending LED state...")
-        print("Value =", state)
-        data = { "led_state": state }
-        response = urequests.post(url, json = data, headers = http_headers)
-        response.close()
-    except:
-        print("Failed to send data to", url)
+    wifi.connect(wifi_ssid, wifi_password)
+    print("Trying to connect to Wifi...")
+
+    while not wifi.isconnected():
+        await uasyncio.sleep_ms(200)
+
+    print("Connected to", wifi_ssid)
 
 # Send information from DHT22 sensor
-def send_dht22 (temperature, humidity):
+async def send_dht22 (temperature, humidity):
+    if not wifi.isconnected():
+        return
+
     try:
         url = server_url + "/dht22"
         print("Sending DHT22 data...")
@@ -70,41 +61,61 @@ def send_dht22 (temperature, humidity):
     except:
         print("Failed to send data to", url)
 
-# Connecting to WiFi
-connect_wifi()
+def get_localtime ():
+    ntptime.settime()
+    return time.localtime(time.time() + cet_offset)
 
-# By default button is not pressed (value = 1)
-last_btn_value = 1
+async def ssd1306_display ():
+    # Init display
+    oled_width = 128
+    oled_height = 64
+    oled = ssd1306.SSD1306_I2C(oled_width, oled_height, i2c)
+    t = None
 
-# Default dht22 values
-last_humidity = -1
-last_temperature = -1
+    while True:
+        is_connected = wifi.isconnected()
 
-# Main loop
-while True:
-    # curr_btn_value = button.value()
+        if is_connected:
+            t = get_localtime()
 
-    # if curr_btn_value == 0:
-    #     led.value(1)
-    # else:
-    #     led.value(0)
+        oled.fill(0)
+        oled.text('WiFi: ' + ("On" if is_connected else "Off"), 0, 0)
+        oled.text('Date: ' + ("{:02d}.{:02d}.{}".format(t[2], t[1], t[0]) if is_connected else ""), 0, 10)
+        oled.text('Time: ' + ("{:02d}:{:02d}".format(t[3], t[4]) if is_connected else ""), 0, 20)
+        oled.text('Temp: ' + str(dht22.temperature()) + " C", 0, 30)
+        oled.text('Humidity: ' + str(dht22.humidity()) + "%", 0, 40)
+        oled.show()
+        await uasyncio.sleep_ms(200)
 
-    # if last_btn_value != curr_btn_value:
-    #     last_btn_value = curr_btn_value
-    #     send_led_state(led.value() == 1)
+async def listen_dht22 ():
+    while True:
+        dht22.measure()
+        await uasyncio.sleep_ms(200)
 
-    dht22.measure()
-    curr_temperature = dht22.temperature()
-    curr_humidity = dht22.humidity()
+async def send ():
+    last_humidity = None
+    last_temperature = None
 
-    if last_temperature != curr_temperature or last_humidity != curr_humidity:
-        # Asserts for Wokwi-CI
-        assert 0 <= curr_humidity <= 100, "Humidity out of range"
-        assert -40 <= curr_temperature <= 80, "Temperature out of range"
-        print("DHT22 values are in valid range") 
+    while True:
+        curr_temperature = dht22.temperature()
+        curr_humidity = dht22.humidity()
 
-        last_temperature = curr_temperature
-        last_humidity = curr_humidity
-        send_dht22(curr_temperature, curr_humidity)
+        if last_temperature != curr_temperature or last_humidity != curr_humidity:
+            last_temperature = curr_temperature
+            last_humidity = curr_humidity
+            await send_dht22(curr_temperature, curr_humidity)
 
-    time.sleep(2)
+        await uasyncio.sleep(10)
+
+async def main ():
+    wifi_task = uasyncio.create_task(connect_wifi())
+    ssd1306_task = uasyncio.create_task(ssd1306_display())
+    dht22_task = uasyncio.create_task(listen_dht22())
+    send_task = uasyncio.create_task(send())
+
+    await wifi_task
+    await ssd1306_task
+    await dht22_task
+    await send_task
+
+uasyncio.run(main())
