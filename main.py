@@ -4,11 +4,14 @@ import network # for WiFi connection
 import urequests # for HTTP requests
 from machine import Pin, I2C
 from dht import DHT22
-import ssd1306
-import uasyncio
+import ssd1306 # for working with ssd1306 display
+import uasyncio # for async tasks
 import ntptime
 
+# NTP server
 ntptime.host = "tik.cesnet.cz"
+
+# Time offset
 cet_offset = 3600
 
 # Temperature and humidity sensor
@@ -21,13 +24,11 @@ i2c = I2C(1, scl=Pin(22), sda=Pin(21))
 wifi_ssid = "Wokwi-GUEST"
 wifi_password = ""
 
-# Connection timeout limit (in seconds)
-timeout_limit = 10
-
 # HTTP
 server_url = "https://5420cb00-2496-4be0-ac62-279446417ea1.mock.pstmn.io"
 http_headers = { "Content-Typ": "application/json" }
 
+# WiFi connection
 wifi = network.WLAN(network.STA_IF)
 
 # Connect to WiFi
@@ -58,13 +59,17 @@ async def send_dht22 (temperature, humidity):
         data = { "temperature": temperature, "humidity": humidity }
         response = urequests.post(url, json = data, headers = http_headers)
         response.close()
+        sending = False
     except:
         print("Failed to send data to", url)
 
-def get_localtime ():
+# Get localtime with offset
+def get_localtime (offset):
+    # Synchronize with NTP server every time to make sure that time is correct
     ntptime.settime()
-    return time.localtime(time.time() + cet_offset)
+    return time.localtime(time.time() + offset)
 
+# Display current date, time and DHT22 data
 async def ssd1306_display ():
     # Init display
     oled_width = 128
@@ -76,22 +81,24 @@ async def ssd1306_display ():
         is_connected = wifi.isconnected()
 
         if is_connected:
-            t = get_localtime()
+            t = get_localtime(cet_offset)
 
         oled.fill(0)
-        oled.text('WiFi: ' + ("On" if is_connected else "Off"), 0, 0)
-        oled.text('Date: ' + ("{:02d}.{:02d}.{}".format(t[2], t[1], t[0]) if is_connected else ""), 0, 10)
-        oled.text('Time: ' + ("{:02d}:{:02d}".format(t[3], t[4]) if is_connected else ""), 0, 20)
-        oled.text('Temp: ' + str(dht22.temperature()) + " C", 0, 30)
-        oled.text('Humidity: ' + str(dht22.humidity()) + "%", 0, 40)
+        oled.text("WiFi: " + ("On" if is_connected else "Off"), 0, 0)
+        oled.text("Date: " + ("{:02d}.{:02d}.{}".format(t[2], t[1], t[0]) if is_connected else ""), 0, 10)
+        oled.text("Time: " + ("{:02d}:{:02d}".format(t[3], t[4]) if is_connected else ""), 0, 20)
+        oled.text("Temp: " + str(dht22.temperature()) + " C", 0, 30)
+        oled.text("Humidity: " + str(dht22.humidity()) + "%", 0, 40)
         oled.show()
         await uasyncio.sleep_ms(200)
 
+# Measure values from DHT22 sensor
 async def listen_dht22 ():
     while True:
         dht22.measure()
         await uasyncio.sleep_ms(200)
 
+# Send DHT22 data to mock server, if something changed
 async def send ():
     last_humidity = None
     last_temperature = None
@@ -108,11 +115,13 @@ async def send ():
         await uasyncio.sleep(10)
 
 async def main ():
+    # Create tasks
     wifi_task = uasyncio.create_task(connect_wifi())
     ssd1306_task = uasyncio.create_task(ssd1306_display())
     dht22_task = uasyncio.create_task(listen_dht22())
     send_task = uasyncio.create_task(send())
 
+    # Run
     await wifi_task
     await ssd1306_task
     await dht22_task
