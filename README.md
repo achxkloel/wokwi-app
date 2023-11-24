@@ -59,12 +59,8 @@ Error: Error 4: Failed to start simulation: TypeError: Failed to parse URL from 
 ```
 
 Probably the issue with the MicroPython within Wokwi CLI. \
-Issue related to - https://github.com/wokwi/wokwi-features/issues/652
+Issue related to - https://github.com/wokwi/wokwi-features/issues/652 \
 Possible solution - https://github.com/Josverl/wokwi_esp32_micropython/tree/fix/devcontainer or re-implement using Rust or Arduino :)
-
-1. Install `wokwi-cli`
-2. Create `WOKWI_CLI_TOKEN` and set it to environment variable
-3. Run `wokwi-cli .`
 
 It is possible to use wokwi-cli with Github Actions.
 But it doesn't work due to the same error.
